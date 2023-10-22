@@ -1,0 +1,243 @@
+#!/usr/bin/bash
+
+RED='\033[1;91m'
+BLUE='\033[1;94m'
+GREEN='\033[1;92m'
+YELLOW='\033[1;33m'
+RESETCOLOR='\033[1;00m'
+
+[ -n "$LOOP_SLEEP" ]||\
+    LOOP_SLEEP=5
+[ -n "$MIC_SOURCE" ]||\
+    MIC_SOURCE=tui
+[ -n "$SINK_NAME" ]||\
+    SINK_NAME=CombaudSink
+[ -n "$VIRTUAL_MIC_NAME" ]||\
+    VIRTUAL_MIC_NAME=CombaudMic
+
+MODULE_NAME=module-null-sink
+
+error_msg() {
+    echo -e "${RED}[ ERROR ][$(date +"%Y.%m.%d %T")]: $@ $RESETCOLOR"
+}
+
+info_msg() {
+    if [ "$QUIET_MODE" != 1 ]
+        then echo -e "${GREEN}[ INFO ][$(date +"%Y.%m.%d %T")]: $@ $RESETCOLOR"
+    fi
+}
+
+get_app_name() { grep -wim1 "$1" 2>/dev/null|sed 's@  |<- @@g;s|:output_F[L|R]$||g' ; }
+
+is_sink_loaded() (
+    set -o pipefail
+    pactl list modules|grep -m1 -A1 "$MODULE_NAME" 2>/dev/null|\
+        grep -qwo "$VIRTUAL_MIC_NAME" 2>/dev/null
+)
+
+is_app_linked() (
+    set -o pipefail
+    pw-link -l|grep -A2 -im1 "^$1" 2>/dev/null|\
+    grep -B2 "^  |-> $SINK_NAME:playback" 2>/dev/null|
+    get_app_name "$1"
+)
+
+stop_sink() { pactl unload-module "$MODULE_NAME" 2>/dev/null && info_msg "Combaud stopped!" ; }
+
+start_sink() {
+    get_mic_sources() { pw-link -o|grep ':capture_'|sed 's|:capture_.*||g'|sort -u ; }
+    is_mono_mic() {
+        local ret=1
+        mono_mic="$(sed "s|$MIC_SOURCE:capture_||g"<<<"$1")"
+        case "${mono_mic,,}" in
+            mono|1) local ret=0 ;;
+        esac
+        return $ret
+    }
+    if ! is_sink_loaded
+        then
+            if [ "$MIC_SOURCE" == 'tui' ]
+                then
+                    local mic_sources=($(get_mic_sources))
+                    if [ "${#mic_sources[@]}" == 1 ]
+                        then MIC_SOURCE="${mic_sources[0]}"
+                        else
+                            if [ "${#mic_sources[@]}" == 0 ]
+                                then
+                                    error_msg "Microphone sources not found!"
+                                    exit 1
+                                else
+                                    for i in $(seq 0 $((${#mic_sources[@]}-1)))
+                                        do echo "$((i+1)))" "${mic_sources[$i]}"
+                                    done
+                                    while true
+                                        do
+                                            read -p 'Enter the microphone number: ' mic_choice
+                                            if [[ "$mic_choice" =~ ^[0-9]+$  && "$mic_choice" -gt 0 && \
+                                                "$mic_choice" -le ${#mic_sources[@]} ]]
+                                                then
+                                                    MIC_SOURCE="${mic_sources[$(($mic_choice-1))]}"
+                                                    break
+                                                else
+                                                    error_msg "Invalid number!"
+                                                    sleep 1
+                                            fi
+                                    done
+                            fi
+                    fi
+            fi
+            local mic_capture="$(pw-link -o|grep "$MIC_SOURCE:capture_" 2>/dev/null|head -1)"
+            if [ -n "$mic_capture" ]
+                then
+                    pactl load-module "$MODULE_NAME" \
+                        media.class=Audio/Sink \
+                        sink_name="$SINK_NAME" \
+                        channel_map=stereo &>/dev/null
+                    pactl load-module "$MODULE_NAME" \
+                        media.class=Audio/Source/Virtual \
+                        sink_name="$VIRTUAL_MIC_NAME" \
+                        channel_map=front-left,front-right &>/dev/null
+                    info_msg "Linking '${BLUE}${MIC_SOURCE}${GREEN}' -> '${BLUE}${SINK_NAME}${GREEN}'"
+                    if is_mono_mic "$mic_capture"
+                        then
+                            pw-link "$MIC_SOURCE":capture_$mono_mic "$SINK_NAME":playback_FL
+                            pw-link "$MIC_SOURCE":capture_$mono_mic "$SINK_NAME":playback_FR
+                        else
+                            pw-link "$MIC_SOURCE":capture_FL "$SINK_NAME":playback_FL
+                            pw-link "$MIC_SOURCE":capture_FR "$SINK_NAME":playback_FR
+                    fi
+                    info_msg "Creating virtual mic: '${BLUE}${VIRTUAL_MIC_NAME}${GREEN}'"
+                    pw-link "$SINK_NAME":monitor_FL "$VIRTUAL_MIC_NAME":input_FL
+                    pw-link "$SINK_NAME":monitor_FR "$VIRTUAL_MIC_NAME":input_FR
+                else
+                    error_msg "Microphone source not found!"
+                    exit 1
+            fi
+    fi
+}
+
+get_sink_id() { pw-link -I -i|grep "$SINK_NAME:playback_$1" 2>/dev/null|awk '{print$1}' ; }
+
+get_app_id() { pw-link -I -o|grep "$1:output_$2" 2>/dev/null|awk '{print$1}' ; }
+
+get_output_apps() {
+    pw-link -o|grep ':output_F[L|R]'|grep -v '^alsa_output.'|\
+    grep -v '^ee_s[o|i]e_.*'|grep -v '^kwin_.*'|\
+    grep -v '^ee_test.*'|sed 's|:output_.*||g'|sort -u
+}
+
+unlink_app() {
+    local sink_fl_id="$(get_sink_id FL)"
+    local sink_fr_id="$(get_sink_id FR)"
+    if [[ -n "$sink_fl_id" && -n "$sink_fr_id" ]]
+        then
+            for app in "$@"
+                do
+                    local app_name="$(is_app_linked "$app")"
+                    if [ -n "$app_name" ]
+                        then
+                            local app_fl_id=($(get_app_id "$app_name" FL))
+                            local app_fr_id=($(get_app_id "$app_name" FR))
+                            info_msg "Unlinking app: '${BLUE}${app_name}${GREEN}' <- '${BLUE}${SINK_NAME}${GREEN}'"
+                            for app_id in "${app_fl_id[@]}"
+                                do pw-link -d $app_id $sink_fl_id
+                            done
+                            for app_id in "${app_fr_id[@]}"
+                                do pw-link -d $app_id $sink_fr_id
+                            done
+                        else info_msg "App '${BLUE}${app}${GREEN}' already unlinked or not found!"
+                    fi
+            done
+        else
+            error_msg "Sink ID not found!"
+            exit 1
+    fi
+}
+
+link_app() {
+    local ret=0
+    local sink_fl_id="$(get_sink_id FL)"
+    local sink_fr_id="$(get_sink_id FR)"
+    if [[ -n "$sink_fl_id" && -n "$sink_fr_id" ]]
+        then
+            for app in "$@"
+                do
+                    local app_name="$(pw-link -o|get_app_name "$app")"
+                    if [ -n "$app_name" ]
+                        then
+                            local app_fl_id=($(get_app_id "$app_name" FL))
+                            local app_fr_id=($(get_app_id "$app_name" FR))
+                            if is_app_linked "$app_name" &>/dev/null
+                                then info_msg "App '${BLUE}${app_name}${GREEN}' already linked!"
+                                else
+                                    info_msg "Linking app: '${BLUE}${app_name}${GREEN}' -> '${BLUE}${SINK_NAME}${GREEN}'"
+                                    for app_id in "${app_fl_id[@]}"
+                                        do pw-link $app_id $sink_fl_id
+                                    done
+                                    for app_id in "${app_fr_id[@]}"
+                                        do pw-link $app_id $sink_fr_id
+                                    done
+                            fi
+                        else
+                            error_msg "App '${BLUE}${app}${RED}' not found!"
+                            local ret=1
+                    fi
+            done
+        else
+            error_msg "Sink ID not found!"
+            exit 1
+    fi
+    return $ret
+}
+
+link_loop() {
+    trap 'stop_sink' EXIT SIGINT SIGTERM
+    while true
+        do
+            if [ -n "$1" ]
+                then link_app "$@"
+                else
+                    OLD_IFS="$IFS"
+                    IFS=$'\n'
+                    local output_apps=($(get_output_apps))
+                    IFS="$OLD_IFS"
+                    link_app "${output_apps[@]}"
+            fi
+            sleep $LOOP_SLEEP
+    done
+}
+
+print_help() {
+    local HOSTNAME="$(uname -a|awk '{print$2}')"
+    echo -e "
+${RED}Broadcasting audio output from applications to a virtual microphone
+    ${RED}Usage:
+        $RED┌──[$GREEN$USER$YELLOW@$BLUE${HOSTNAME}$RED]─[$GREEN$PWD$RED]
+        $RED└──╼ \$$GREEN "$(basename "${0}")"${BLUE} {args} $YELLOW{app app...}
+
+        ${BLUE}--help  ${RED}|${BLUE}-h$GREEN              Show this usage info
+        ${BLUE}--loop  ${RED}|${BLUE}-l$GREEN $YELLOW{app app...}$GREEN Capture an applications to mic in a loop
+        ${BLUE}--del   ${RED}|${BLUE}-d$GREEN $YELLOW{app app...}$GREEN Remove the applications from mic capture
+        ${BLUE}--stop  ${RED}|${BLUE}-s$GREEN              Stop the capture
+        "
+}
+
+if [ -n "$1" ]
+    then
+        case "$1" in
+            --del|-d)
+                shift
+                unlink_app "$@" ;;
+            --stop|-s)
+                stop_sink ;;
+            --loop|-l)
+                shift
+                start_sink
+                link_loop "$@" ;;
+            --help|-h) print_help ;;
+            *)
+                start_sink
+                link_app "$@" ;;
+        esac
+    else start_sink
+fi
