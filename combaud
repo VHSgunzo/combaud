@@ -194,7 +194,6 @@ link_app() {
 }
 
 link_loop() {
-    trap 'stop_sink' EXIT SIGINT SIGTERM
     while true
         do
             if [ -n "$1" ]
