@@ -9,11 +9,29 @@ RESETCOLOR='\033[1;00m'
 [ -n "$LOOP_SLEEP" ]||\
     LOOP_SLEEP=5
 [ -n "$MIC_SOURCE" ]||\
-    MIC_SOURCE=tui
+    MIC_SOURCE=TUI
 [ -n "$SINK_NAME" ]||\
     SINK_NAME=CombaudSink
 [ -n "$VIRTUAL_MIC_NAME" ]||\
     VIRTUAL_MIC_NAME=CombaudMic
+
+SYS_LOOP_IGNORE_LIST_FL='/etc/combaud/loop-ignore.list'
+USER_LOOP_IGNORE_LIST_FL="$HOME/.config/combaud/loop-ignore.list"
+if [ ! -n "$LOOP_IGNORE_LIST_FL" ]
+    then
+        if [ -f "$USER_LOOP_IGNORE_LIST_FL" ]
+            then LOOP_IGNORE_LIST_FL="$USER_LOOP_IGNORE_LIST_FL"
+        elif [ -f "$SYS_LOOP_IGNORE_LIST_FL" ]
+            then LOOP_IGNORE_LIST_FL="$SYS_LOOP_IGNORE_LIST_FL"
+        fi
+fi
+if [ -f "$LOOP_IGNORE_LIST_FL" ]
+    then
+        OLD_IFS="$IFS"
+        IFS=$'\n'
+        LOOP_IGNORE_LIST=($(cat "$LOOP_IGNORE_LIST_FL" 2>/dev/null|grep -v '^#'))
+        IFS="$OLD_IFS"
+fi
 
 MODULE_NAME=module-null-sink
 
@@ -56,7 +74,7 @@ start_sink() {
     }
     if ! is_sink_loaded
         then
-            if [ "$MIC_SOURCE" == 'tui' ]
+            if [ "$MIC_SOURCE" == 'TUI' ]
                 then
                     OLD_IFS="$IFS"
                     IFS=$'\n'
@@ -124,9 +142,17 @@ get_sink_id() { pw-link -I -i|grep "$SINK_NAME:playback_$1" 2>/dev/null|awk '{pr
 get_app_id() { pw-link -I -o|grep "$1:output_$2" 2>/dev/null|awk '{print$1}' ; }
 
 get_output_apps() {
-    pw-link -o|grep ':output_F[L|R]'|grep -v '^alsa_output.'|\
-    grep -v '^ee_s[o|i]e_.*'|grep -v '^kwin_.*'|\
-    grep -v '^ee_test.*'|sed 's|:output_.*||g'|sort -u
+    local output_apps="$(pw-link -o|grep ':output_F[L|R]'|\
+        grep -v '^alsa_output.'|grep -v '^ee_s[o|i]e_.*'|\
+        grep -v '^kwin_.*'|grep -v '^ee_test.*'|\
+        sed 's|:output_.*||g'|sort -u)"
+    if [ -n "$LOOP_IGNORE_LIST" ]
+        then
+            for app in "${LOOP_IGNORE_LIST[@]}"
+                do local output_apps="$(grep -iv "^$app$"<<<"$output_apps")"
+            done
+    fi
+    [ -n "$output_apps" ] && echo "$output_apps"||return 1
 }
 
 unlink_app() {
