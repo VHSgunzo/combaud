@@ -58,7 +58,10 @@ start_sink() {
         then
             if [ "$MIC_SOURCE" == 'tui' ]
                 then
+                    OLD_IFS="$IFS"
+                    IFS=$'\n'
                     local mic_sources=($(get_mic_sources))
+                    IFS="$OLD_IFS"
                     if [ "${#mic_sources[@]}" == 1 ]
                         then MIC_SOURCE="${mic_sources[0]}"
                         else
