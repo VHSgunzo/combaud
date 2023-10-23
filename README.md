@@ -12,6 +12,7 @@ $ combaud {args} {app app...}
 ```
 
 ## **Environment variables:**
+* `QUIET_MODE`          - Disables all info msg
 * `LOOP_SLEEP`          - Capture loop waiting time (Def: `5`)
 * `SINK_NAME`           - Name of the combaud sink (Def: `CombaudSink`)
 * `MIC_SOURCE`          - Name of the system mic (Def: `TUI`)
