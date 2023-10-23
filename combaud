@@ -216,8 +216,8 @@ ${RED}Broadcasting audio output from applications to a virtual microphone
         $RED└──╼ \$$GREEN "$(basename "${0}")"${BLUE} {args} $YELLOW{app app...}
 
         ${BLUE}--help  ${RED}|${BLUE}-h$GREEN              Show this usage info
-        ${BLUE}--loop  ${RED}|${BLUE}-l$GREEN $YELLOW{app app...}$GREEN Capture an applications to mic in a loop
-        ${BLUE}--del   ${RED}|${BLUE}-d$GREEN $YELLOW{app app...}$GREEN Remove the applications from mic capture
+        ${BLUE}--loop  ${RED}|${BLUE}-l$GREEN $YELLOW{app app...}$GREEN Capture apps to the mic in a loop
+        ${BLUE}--del   ${RED}|${BLUE}-d$GREEN $YELLOW{app app...}$GREEN Remove apps from the mic capture
         ${BLUE}--stop  ${RED}|${BLUE}-s$GREEN              Stop the capture
         "
 }

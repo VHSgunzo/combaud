@@ -22,7 +22,7 @@ jobs:
         uses: countstarlight/arch-makepkg-action@master
         with:
           scripts: |
-            sudo mv -f makepkg-x86_64.conf /etc/makepkg.conf ;
+            sudo mv -f makepkg.conf /etc/makepkg.conf ;
             makepkg -fsCc --noconfirm ;
 
       - name: Release
