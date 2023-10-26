@@ -6,6 +6,8 @@ GREEN='\033[1;92m'
 YELLOW='\033[1;33m'
 RESETCOLOR='\033[1;00m'
 
+MODULE_NAME=module-null-sink
+
 [ -n "$LOOP_SLEEP" ]||\
     LOOP_SLEEP=5
 [ -n "$MIC_SOURCE" ]||\
@@ -32,8 +34,6 @@ if [ -f "$LOOP_IGNORE_LIST_FL" ]
         LOOP_IGNORE_LIST=($(cat "$LOOP_IGNORE_LIST_FL" 2>/dev/null|grep -v '^#'))
         IFS="$OLD_IFS"
 fi
-
-MODULE_NAME=module-null-sink
 
 error_msg() {
     echo -e "${RED}[ ERROR ][$(date +"%Y.%m.%d %T")]: $@ $RESETCOLOR"
@@ -63,7 +63,7 @@ is_app_linked() (
 stop_sink() { pactl unload-module "$MODULE_NAME" 2>/dev/null && info_msg "Combaud stopped!" ; }
 
 start_sink() {
-    get_mic_sources() { pw-link -o|grep ':capture_'|sed 's|:capture_.*||g'|sort -u ; }
+    get_mic_sources() { pw-link -o|grep ':capture_'|grep -v '^v4l2_input'|sed 's|:capture_.*||g'|sort -u ; }
     is_mono_mic() {
         local ret=1
         mono_mic="$(sed "s|$MIC_SOURCE:capture_||g"<<<"$1")"
@@ -110,24 +110,28 @@ start_sink() {
             local mic_capture="$(pw-link -o|grep "$MIC_SOURCE:capture_" 2>/dev/null|head -1)"
             if [ -n "$mic_capture" ]
                 then
+                    info_msg "Creating combaud sink: '${BLUE}${SINK_NAME}${GREEN}'"
                     pactl load-module "$MODULE_NAME" \
                         media.class=Audio/Sink \
                         sink_name="$SINK_NAME" \
-                        channel_map=stereo &>/dev/null
+                        channel_map=stereo 1>/dev/null
+                    info_msg "Creating combaud mic: '${BLUE}${VIRTUAL_MIC_NAME}${GREEN}'"
                     pactl load-module "$MODULE_NAME" \
                         media.class=Audio/Source/Virtual \
                         sink_name="$VIRTUAL_MIC_NAME" \
-                        channel_map=front-left,front-right &>/dev/null
+                        channel_map=front-left,front-right 1>/dev/null
                     info_msg "Linking '${BLUE}${MIC_SOURCE}${GREEN}' -> '${BLUE}${SINK_NAME}${GREEN}'"
                     if is_mono_mic "$mic_capture"
                         then
-                            pw-link "$MIC_SOURCE":capture_$mono_mic "$SINK_NAME":playback_FL
-                            pw-link "$MIC_SOURCE":capture_$mono_mic "$SINK_NAME":playback_FR
+                            local mic_src_capture_fl="$MIC_SOURCE:capture_$mono_mic"
+                            local mic_src_capture_fr="$MIC_SOURCE:capture_$mono_mic"
                         else
-                            pw-link "$MIC_SOURCE":capture_FL "$SINK_NAME":playback_FL
-                            pw-link "$MIC_SOURCE":capture_FR "$SINK_NAME":playback_FR
+                            local mic_src_capture_fl="$MIC_SOURCE:capture_FL"
+                            local mic_src_capture_fr="$MIC_SOURCE:capture_FR"
                     fi
-                    info_msg "Creating virtual mic: '${BLUE}${VIRTUAL_MIC_NAME}${GREEN}'"
+                    pw-link "$mic_src_capture_fl" "$SINK_NAME":playback_FL
+                    pw-link "$mic_src_capture_fr" "$SINK_NAME":playback_FR
+                    info_msg "Linking '${BLUE}${SINK_NAME}${GREEN}' -> '${BLUE}${VIRTUAL_MIC_NAME}${GREEN}'"
                     pw-link "$SINK_NAME":monitor_FL "$VIRTUAL_MIC_NAME":input_FL
                     pw-link "$SINK_NAME":monitor_FR "$VIRTUAL_MIC_NAME":input_FR
                 else

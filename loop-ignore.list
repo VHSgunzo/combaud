@@ -3,3 +3,10 @@
 # The name of each application should start with a new line.
 # The default file path is: /etc/combaud/loop-ignore.list
 # Or for each user: $HOME/.config/combaud/loop-ignore.list
+# ---------------------------------------------------------
+# Skype
+# Discord
+# Telegram
+# Telegram Desktop
+# telegram-desktop
+# WEBRTC VoiceEngine
